@@ -1,6 +1,6 @@
 name: Streamlit 自动唤醒
 
-#on:
+on:
  # workflow_dispatch:
   #repository_dispatch:
    #types: [service-down-alert]
