@@ -19,9 +19,9 @@ SUB_FILE = f"{WORKDIR}/sub.txt"
 # 环境变量
 KOMARI_HOST = os.environ.get('KOMARI_HOST', 'https://km.bcbc.pp.ua').strip()
 KOMARI_TOKEN = os.environ.get('KOMARI_TOKEN', '3vvAQAdXAjO8oA1Nl5u25g').strip()
-UUID = os.environ.get('UUID', '20e6e496-cf19-45c8-b883-14f5e11cd9f1')
-ARGO_AUTH = os.environ.get('ARGO_AUTH', '')
-ARGO_DOMAIN = os.environ.get('ARGO_DOMAIN', '')
+UUID = os.environ.get('UUID', '8e3bd89a-4809-469e-99c5-ee9edeed7439')
+ARGO_AUTH = os.environ.get('ARGO_AUTH', 'eyJhIjoiMzM5OTA1ZWFmYjM2OWM5N2M2YjZkYTI4NTgxMjlhMjQiLCJ0IjoiM2VlZTQyNzItZTQwZS00YmUzLThkYzQtMWU0MWFhZmUwNWMxIiwicyI6Ik1USTRaREl5WkRndFpqYzBaaTAwTkdJd0xXSTFaREl0WmpjME5EZ3pNRFV3TkdNMyJ9')
+ARGO_DOMAIN = os.environ.get('ARGO_DOMAIN', 'stre.61154321.dpdns.org')
 NAME = os.environ.get('NAME', 'StreamlitNode')
 CFIP = os.environ.get('CFIP', 'www.visa.com.tw')
 CFPORT = int(os.environ.get('CFPORT', '443'))
