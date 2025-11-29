@@ -3,17 +3,14 @@ import os
 import subprocess
 import requests
 import time
-import threading
-import json
 import base64
+import json
 import re
 import shutil
-from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # ==========================================
 # === 配置区域
 # ==========================================
-# 核心路径 (固定)
 WORKDIR = "/tmp/komari-run"
 LOG_FILE = f"{WORKDIR}/boot.log"
 LIST_FILE = f"{WORKDIR}/list.txt"
@@ -35,7 +32,6 @@ ARGO_PORT = 8001
 # ==========================================
 
 def log(msg):
-    """日志仅输出到后台控制台和文件(用于抓取域名)，不再显示在UI"""
     t = time.strftime("%H:%M:%S")
     print(f"[{t}] {msg}")
     try:
@@ -69,13 +65,10 @@ def prepare_binaries():
         download_file("komari-agent", "https://github.com/komari-monitor/komari-agent/releases/latest/download/komari-agent-linux-amd64")
 
 def generate_nodes(domain):
-    """生成节点文件并打印到控制台"""
     node_name = f"{NAME}-Streamlit"
     
-    # VLESS
     vless = f"vless://{UUID}@{CFIP}:{CFPORT}?encryption=none&security=tls&sni={domain}&fp=chrome&type=ws&host={domain}&path=%2Fvless-argo%3Fed%3D2048#{node_name}"
     
-    # VMESS
     vmess_json = {
         "v": "2", "ps": node_name, "add": CFIP, "port": str(CFPORT), "id": UUID, "aid": "0",
         "scy": "none", "net": "ws", "type": "none", "host": domain,
@@ -83,23 +76,20 @@ def generate_nodes(domain):
     }
     vmess = f"vmess://{base64.b64encode(json.dumps(vmess_json).encode()).decode()}"
     
-    # Trojan
     trojan = f"trojan://{UUID}@{CFIP}:{CFPORT}?security=tls&sni={domain}&fp=chrome&type=ws&host={domain}&path=%2Ftrojan-argo%3Fed%3D2048#{node_name}"
 
     content = f"{vless}\n\n{vmess}\n\n{trojan}"
     
-    # 写入文件
     try:
         with open(LIST_FILE, "w") as f: f.write(content)
         with open(SUB_FILE, "w") as f: f.write(base64.b64encode(content.encode()).decode())
         
-        # --- 关键：在官方日志区域输出节点信息 ---
+        # --- 仅在后台控制台打印 ---
         print("\n" + "="*40)
-        print("⚡ NODE LINKS GENERATED (Copy from here) ⚡")
+        print("⚡ NODE LINKS (COPY FROM HERE) ⚡")
         print("="*40)
         print(content)
         print("="*40 + "\n")
-        
         return True
     except Exception as e:
         log(f"Node Gen Error: {e}")
@@ -135,19 +125,14 @@ def generate_config():
         json.dump(config, f, indent=2)
 
 def start_process(cmd):
-    # 使用 >> 追加日志
     full_cmd = f"stdbuf -oL {cmd} >> {LOG_FILE} 2>&1 &"
     subprocess.Popen(full_cmd, shell=True, cwd=WORKDIR)
 
 def run_services():
-    # 1. Start Xray
     start_process(f"./web -c config.json")
-    
-    # 2. Start Komari
     if KOMARI_HOST and KOMARI_TOKEN:
         start_process(f"./komari-agent -e {KOMARI_HOST} -t {KOMARI_TOKEN} --disable-web-ssh --disable-auto-update")
     
-    # 3. Start Argo
     if os.path.exists(f"{WORKDIR}/bot"):
         if ARGO_AUTH:
             if "TunnelSecret" in ARGO_AUTH:
@@ -161,15 +146,16 @@ def run_services():
                 start_process(f"./bot tunnel --no-autoupdate run --token {ARGO_AUTH}")
                 if ARGO_DOMAIN: generate_nodes(ARGO_DOMAIN)
         else:
-            # 临时隧道
             start_process(f"./bot tunnel --no-autoupdate --url http://localhost:{ARGO_PORT}")
 
 # ==========================================
-# === UI 逻辑
+# === UI 逻辑 (空白模式)
 # ==========================================
 def main():
-    st.set_page_config(page_title="Komari Dashboard", layout="wide")
-    st.title("⚡ Komari & Xray Dashboard")
+    # 设置一个空的标题，避免浏览器标签太丑
+    st.set_page_config(page_title=".", layout="centered")
+    
+    # 页面上不输出任何 st.write
 
     # 1. 首次运行初始化
     if "init_ok" not in st.session_state:
@@ -178,21 +164,15 @@ def main():
         generate_config()
         run_services()
         st.session_state["init_ok"] = True
-        st.toast("Services Started")
 
-    # 2. 尝试从日志获取 Argo 域名
-    argo_url = "Scanning..."
-    if ARGO_DOMAIN:
-        argo_url = ARGO_DOMAIN
-    elif os.path.exists(LOG_FILE):
+    # 2. 尝试从日志获取 Argo 域名 (仅后台处理)
+    if not ARGO_DOMAIN and os.path.exists(LOG_FILE):
         try:
             with open(LOG_FILE, "r") as f:
                 content = f.read()
                 match = re.search(r'https://[a-z0-9-]+\.trycloudflare\.com', content)
                 if match:
                     domain = match.group(0).replace("https://", "")
-                    argo_url = domain
-                    # 发现新域名，避免重复生成
                     current_node = ""
                     if os.path.exists(LIST_FILE):
                         with open(LIST_FILE, "r") as lf: current_node = lf.read()
@@ -201,30 +181,9 @@ def main():
                         generate_nodes(domain)
         except: pass
 
-    # 3. 显示区域 (简洁版)
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("📡 Status")
-        st.success(f"**Argo Domain:** {argo_url}")
-        st.info(f"**Komari:** {'✅ Online' if KOMARI_HOST else '❌ Not Configured'}")
-        
-        # 显示 Base64 订阅内容供复制
-        if os.path.exists(SUB_FILE):
-            st.text_input("Subscription URL (Auto-copy)", f"https://{argo_url}/sub" if "trycloudflare" in argo_url else "Check Logs")
-            with open(SUB_FILE, "r") as f:
-                st.text_area("Base64 Subscription", f.read(), height=100)
-
-    with col2:
-        st.subheader("🚀 Node Links")
-        if os.path.exists(LIST_FILE):
-            with open(LIST_FILE, "r") as f:
-                st.code(f.read(), language="text")
-        else:
-            st.warning("Waiting for Argo Tunnel...")
-
-    # 自动刷新
-    time.sleep(5)
+    # 3. 隐形保活
+    # 即使页面没有内容，Streamlit 也会因为这个循环而保持容器运行
+    time.sleep(20) 
     st.rerun()
 
 if __name__ == "__main__":
