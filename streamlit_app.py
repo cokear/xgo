@@ -21,9 +21,9 @@ SUB_FILE = f"{WORKDIR}/sub.txt"
 # 环境变量获取
 KOMARI_HOST = os.environ.get('KOMARI_HOST', 'https://km.bcbc.pp.ua').strip()
 KOMARI_TOKEN = os.environ.get('KOMARI_TOKEN', '3vvAQAdXAjO8oA1Nl5u25g').strip()
-UUID = os.environ.get('UUID', 'c9a63b58-6e2e-4c19-8940-53f7f74aae4b')
-ARGO_AUTH = os.environ.get('ARGO_AUTH', 'eyJhIjoiMzM5OTA1ZWFmYjM2OWM5N2M2YjZkYTI4NTgxMjlhMjQiLCJ0IjoiM2VlZTQyNzItZTQwZS00YmUzLThkYzQtMWU0MWFhZmUwNWMxIiwicyI6Ik1USTRaREl5WkRndFpqYzBaaTAwTkdJd0xXSTFaREl0WmpjME5EZ3pNRFV3TkdNMyJ9')
-ARGO_DOMAIN = os.environ.get('ARGO_DOMAIN', 'stre.61154321.dpdns.org')
+UUID = os.environ.get('UUID', '20e6e496-cf19-45c8-b883-14f5e11cd9f1')
+ARGO_AUTH = os.environ.get('ARGO_AUTH', '')
+ARGO_DOMAIN = os.environ.get('ARGO_DOMAIN', '')
 NAME = os.environ.get('NAME', 'StreamlitNode')
 CFIP = os.environ.get('CFIP', 'www.visa.com.tw')
 CFPORT = int(os.environ.get('CFPORT', '443'))
@@ -46,7 +46,6 @@ def init_env():
     """初始化环境"""
     if not os.path.exists(WORKDIR):
         os.makedirs(WORKDIR, exist_ok=True)
-    # 不删除旧日志，避免刷新丢失信息
     if not os.path.exists(LOG_FILE):
         with open(LOG_FILE, "w") as f: f.write("--- Init ---\n")
 
@@ -101,7 +100,8 @@ def generate_nodes(domain):
         log(f"❌ Node Gen Error: {e}")
         return False
 
-def generate_xray_config():
+# --- 修正函数名：统一定义为 generate_config ---
+def generate_config():
     config = {
         "log": {"access": "/dev/null", "error": "/dev/null", "loglevel": "none"},
         "inbounds": [
@@ -170,10 +170,10 @@ def main():
     # 1. 首次运行初始化
     if "init_ok" not in st.session_state:
         init_env()
-        # 先生成一个假的节点，证明 UI 是好的
+        # 先生成一个占位节点，防止 UI 报错
         generate_nodes("WAITING_FOR_TUNNEL.com") 
         prepare_binaries()
-        generate_config()
+        generate_config() # 这里的名字现在和定义一致了
         run_services()
         st.session_state["init_ok"] = True
         st.toast("Services Started")
@@ -191,7 +191,13 @@ def main():
                     domain = match.group(0).replace("https://", "")
                     argo_url = domain
                     # 发现新域名，更新节点文件
-                    generate_nodes(domain)
+                    # 读取 list.txt 判断是否已经是该域名，避免重复写入
+                    current_node = ""
+                    if os.path.exists(LIST_FILE):
+                        with open(LIST_FILE, "r") as lf: current_node = lf.read()
+                    
+                    if domain not in current_node:
+                        generate_nodes(domain)
         except: pass
 
     # 3. 显示区域
