@@ -6,24 +6,24 @@ import time
 import threading
 import json
 import base64
+import re  # <--- 必须确保这个导入存在，否则会报 NameError
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # ==========================================
 # === 配置区域
 # ==========================================
-# 1. Komari 配置 (必填)
-KOMARI_HOST = os.environ.get('KOMARI_HOST', 'https://km.bcbc.pp.ua')   # 必须带 http:// 或 https://
-KOMARI_TOKEN = os.environ.get('KOMARI_TOKEN', 'vvAQAdXAjO8oA1Nl5u25g') # 密钥
+# 1. Komari 配置 (必填，例如 https://status.yourdomain.com)
+KOMARI_HOST = os.environ.get('KOMARI_HOST', 'https://km.bcbc.pp.ua')   
+KOMARI_TOKEN = os.environ.get('KOMARI_TOKEN', 'vvAQAdXAjO8oA1Nl5u25g') 
 
 # 2. 节点配置
 UUID = os.environ.get('UUID', '8e3bd89a-4809-469e-99c5-ee9edeed7439')
-ARGO_AUTH = os.environ.get('ARGO_AUTH', 'eyJhIjoiMzM5OTA1ZWFmYjM2OWM5N2M2YjZkYTI4NTgxMjlhMjQiLCJ0IjoiM2VlZTQyNzItZTQwZS00YmUzLThkYzQtMWU0MWFhZmUwNWMxIiwicyI6Ik1USTRaREl5WkRndFpqYzBaaTAwTkdJd0xXSTFaREl0WmpjME5EZ3pNRFV3TkdNMyJ9')       # Argo Token/Secret
-ARGO_DOMAIN = os.environ.get('ARGO_DOMAIN', 'stre.61154321.dpdns.org')   # 固定域名
+ARGO_AUTH = os.environ.get('ARGO_AUTH', 'eyJhIjoiMzM5OTA1ZWFmYjM2OWM5N2M2YjZkYTI4NTgxMjlhMjQiLCJ0IjoiM2VlZTQyNzItZTQwZS00YmUzLThkYzQtMWU0MWFhZmUwNWMxIiwicyI6Ik1USTRaREl5WkRndFpqYzBaaTAwTkdJd0xXSTFaREl0WmpjME5EZ3pNRFV3TkdNMyJ9')       
+ARGO_DOMAIN = os.environ.get('ARGO_DOMAIN', 'stre.61154321.dpdns.org')   
 NAME = os.environ.get('NAME', 'StreamlitNode')
 
-# 内部端口 (不要改)
+# 内部配置
 ARGO_PORT = 8001
-VPORT = 443
 WORKDIR = "/tmp/komari_node"
 LOG_FILE = f"{WORKDIR}/app.log"
 
@@ -83,8 +83,7 @@ def prepare_binaries():
     if KOMARI_HOST and KOMARI_TOKEN:
         download_file("komari-agent", "https://github.com/komari-monitor/komari-agent/releases/latest/download/komari-agent-linux-amd64")
     
-    # 3. Argo (Bot) - 只有配置了 Argo 才下载
-    # 默认下载 Cloudflared
+    # 3. Argo (Bot)
     download_file("bot", "https://github.com/eooce/test/releases/download/amd64/bot")
 
 def generate_config():
@@ -94,7 +93,7 @@ def generate_config():
         "log": {"access": "/dev/null", "error": f"{WORKDIR}/xray_error.log", "loglevel": "warning"},
         "inbounds": [
             {
-                "port": ARGO_PORT, # 监听 Argo 转发端口
+                "port": ARGO_PORT, 
                 "protocol": "vless",
                 "settings": {
                     "clients": [{"id": UUID, "flow": "xtls-rprx-vision"}],
@@ -114,7 +113,7 @@ def generate_config():
 def start_process(name, cmd):
     """启动后台进程并将输出重定向到主日志"""
     log(f"Starting {name}...")
-    # 使用 stdbuf -oL 强制行缓冲，让日志实时显示
+    # 使用 stdbuf -oL 强制行缓冲
     full_cmd = f"stdbuf -oL {cmd} >> {LOG_FILE} 2>&1 &"
     subprocess.Popen(full_cmd, shell=True, cwd=WORKDIR)
 
@@ -126,33 +125,30 @@ def run_services():
     
     # 2. 启动 Komari Agent
     if KOMARI_HOST and KOMARI_TOKEN:
-        # 修正参数：-e Endpoint -t Token
-        start_process("Komari Agent", f"./komari-agent -e {KOMARI_HOST} -t {KOMARI_TOKEN} --disable-command-execute --disable-auto-update")
+        # --- 关键修复：参数改为 --disable-web-ssh ---
+        start_process("Komari Agent", f"./komari-agent -e {KOMARI_HOST} -t {KOMARI_TOKEN} --disable-web-ssh --disable-auto-update")
     else:
         log("Komari config missing, skipping agent.")
 
     # 3. 启动 Argo Tunnel
     if os.path.exists(f"{WORKDIR}/bot"):
         if ARGO_AUTH and "TunnelSecret" in ARGO_AUTH:
-            # 固定隧道 json 模式
             with open(f"{WORKDIR}/tunnel.json", "w") as f: f.write(ARGO_AUTH)
             tunnel_id = ARGO_AUTH.split('"')[11]
             yml = f"tunnel: {tunnel_id}\ncredentials-file: {WORKDIR}/tunnel.json\nprotocol: http2\ningress:\n  - hostname: {ARGO_DOMAIN}\n    service: http://localhost:{ARGO_PORT}\n    originRequest:\n      noTLSVerify: true\n  - service: http_status:404"
             with open(f"{WORKDIR}/tunnel.yml", "w") as f: f.write(yml)
             start_process("Argo (Fixed)", f"./bot tunnel --config tunnel.yml run")
         elif ARGO_AUTH:
-            # Token 模式
             start_process("Argo (Token)", f"./bot tunnel --no-autoupdate run --token {ARGO_AUTH}")
         else:
-            # 临时隧道模式
             start_process("Argo (Quick)", f"./bot tunnel --no-autoupdate --url http://localhost:{ARGO_PORT}")
 
 # ==========================================
 # === Streamlit UI 主入口
 # ==========================================
 def main():
-    st.set_page_config(page_title="Komari Node Monitor", layout="wide")
-    st.title("🚀 Komari Node & Agent Monitor")
+    st.set_page_config(page_title="Komari Monitor", layout="wide")
+    st.title("🚀 Komari Node Monitor")
     
     # 初始化环境
     if "init_done" not in st.session_state:
@@ -167,11 +163,9 @@ def main():
     st.subheader("📝 Real-time Logs")
     log_placeholder = st.empty()
     
-    # 自动刷新日志
     if os.path.exists(LOG_FILE):
         with open(LOG_FILE, "r") as f:
             lines = f.readlines()
-            # 显示最后 50 行
             log_content = "".join(lines[-50:])
             log_placeholder.code(log_content, language="text")
     else:
@@ -180,28 +174,27 @@ def main():
     # 提取 Argo 域名
     argo_url = "Waiting..."
     if os.path.exists(LOG_FILE):
-        with open(LOG_FILE, "r") as f:
-            content = f.read()
-            # 查找临时隧道地址
-            match = re.search(r'https://[a-z0-9-]+\.trycloudflare\.com', content)
-            if match:
-                argo_url = match.group(0)
-            elif ARGO_DOMAIN:
-                argo_url = f"https://{ARGO_DOMAIN}"
+        try:
+            with open(LOG_FILE, "r") as f:
+                content = f.read()
+                # 使用 try-except 防止正则报错
+                match = re.search(r'https://[a-z0-9-]+\.trycloudflare\.com', content)
+                if match:
+                    argo_url = match.group(0)
+                elif ARGO_DOMAIN:
+                    argo_url = f"https://{ARGO_DOMAIN}"
+        except Exception as e:
+            argo_url = f"Error parsing log: {e}"
     
-    st.subheader("🔗 Connection Info")
+    st.subheader("🔗 Info")
     col1, col2 = st.columns(2)
     with col1:
         st.info(f"**Argo URL:** {argo_url}")
     with col2:
-        st.info(f"**Komari Host:** {KOMARI_HOST if KOMARI_HOST else 'Not Configured'}")
+        st.info(f"**Komari:** {KOMARI_HOST if KOMARI_HOST else 'Not Configured'}")
 
-    # 手动刷新按钮
-    if st.button("Refresh Logs"):
-        st.rerun()
-
-    # 自动刷新 (利用 Streamlit 的机制保持活跃)
-    time.sleep(2)
+    # 自动刷新
+    time.sleep(3)
     st.rerun()
 
 if __name__ == "__main__":
