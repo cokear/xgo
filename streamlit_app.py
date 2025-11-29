@@ -14,7 +14,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 # ==========================================
 # 1. Komari 配置 (必填，例如 https://status.yourdomain.com)
 KOMARI_HOST = os.environ.get('KOMARI_HOST', 'https://km.bcbc.pp.ua')   
-KOMARI_TOKEN = os.environ.get('KOMARI_TOKEN', 'vvAQAdXAjO8oA1Nl5u25g') 
+KOMARI_TOKEN = os.environ.get('KOMARI_TOKEN', '3vvAQAdXAjO8oA1Nl5u25g') 
 
 # 2. 节点配置
 UUID = os.environ.get('UUID', '8e3bd89a-4809-469e-99c5-ee9edeed7439')
