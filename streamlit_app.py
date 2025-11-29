@@ -11,14 +11,15 @@ import shutil
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # ==========================================
-# === 强制配置 (硬编码路径以排除干扰)
+# === 配置区域
 # ==========================================
+# 核心路径 (固定)
 WORKDIR = "/tmp/komari-run"
 LOG_FILE = f"{WORKDIR}/boot.log"
 LIST_FILE = f"{WORKDIR}/list.txt"
 SUB_FILE = f"{WORKDIR}/sub.txt"
 
-# 环境变量获取
+# 环境变量
 KOMARI_HOST = os.environ.get('KOMARI_HOST', 'https://km.bcbc.pp.ua').strip()
 KOMARI_TOKEN = os.environ.get('KOMARI_TOKEN', '3vvAQAdXAjO8oA1Nl5u25g').strip()
 UUID = os.environ.get('UUID', '20e6e496-cf19-45c8-b883-14f5e11cd9f1')
@@ -34,7 +35,7 @@ ARGO_PORT = 8001
 # ==========================================
 
 def log(msg):
-    """写日志"""
+    """日志仅输出到后台控制台和文件(用于抓取域名)，不再显示在UI"""
     t = time.strftime("%H:%M:%S")
     print(f"[{t}] {msg}")
     try:
@@ -43,14 +44,12 @@ def log(msg):
     except: pass
 
 def init_env():
-    """初始化环境"""
     if not os.path.exists(WORKDIR):
         os.makedirs(WORKDIR, exist_ok=True)
     if not os.path.exists(LOG_FILE):
         with open(LOG_FILE, "w") as f: f.write("--- Init ---\n")
 
 def download_file(filename, url):
-    """下载文件"""
     dest = f"{WORKDIR}/{filename}"
     if os.path.exists(dest): return
     log(f"Downloading {filename}...")
@@ -60,7 +59,6 @@ def download_file(filename, url):
         with open(dest, "wb") as f:
             for chunk in r.iter_content(8192): f.write(chunk)
         os.chmod(dest, 0o775)
-        log(f"Installed {filename}")
     except Exception as e:
         log(f"Download Error {filename}: {e}")
 
@@ -71,7 +69,7 @@ def prepare_binaries():
         download_file("komari-agent", "https://github.com/komari-monitor/komari-agent/releases/latest/download/komari-agent-linux-amd64")
 
 def generate_nodes(domain):
-    """生成节点文件"""
+    """生成节点文件并打印到控制台"""
     node_name = f"{NAME}-Streamlit"
     
     # VLESS
@@ -94,13 +92,19 @@ def generate_nodes(domain):
     try:
         with open(LIST_FILE, "w") as f: f.write(content)
         with open(SUB_FILE, "w") as f: f.write(base64.b64encode(content.encode()).decode())
-        log(f"✅ Nodes generated for: {domain}")
+        
+        # --- 关键：在官方日志区域输出节点信息 ---
+        print("\n" + "="*40)
+        print("⚡ NODE LINKS GENERATED (Copy from here) ⚡")
+        print("="*40)
+        print(content)
+        print("="*40 + "\n")
+        
         return True
     except Exception as e:
-        log(f"❌ Node Gen Error: {e}")
+        log(f"Node Gen Error: {e}")
         return False
 
-# --- 修正函数名：统一定义为 generate_config ---
 def generate_config():
     config = {
         "log": {"access": "/dev/null", "error": "/dev/null", "loglevel": "none"},
@@ -131,7 +135,7 @@ def generate_config():
         json.dump(config, f, indent=2)
 
 def start_process(cmd):
-    # 使用 >> 追加日志，防止覆盖
+    # 使用 >> 追加日志
     full_cmd = f"stdbuf -oL {cmd} >> {LOG_FILE} 2>&1 &"
     subprocess.Popen(full_cmd, shell=True, cwd=WORKDIR)
 
@@ -139,7 +143,7 @@ def run_services():
     # 1. Start Xray
     start_process(f"./web -c config.json")
     
-    # 2. Start Komari (修复后的参数)
+    # 2. Start Komari
     if KOMARI_HOST and KOMARI_TOKEN:
         start_process(f"./komari-agent -e {KOMARI_HOST} -t {KOMARI_TOKEN} --disable-web-ssh --disable-auto-update")
     
@@ -152,7 +156,7 @@ def run_services():
                 yml = f"tunnel: {tid}\ncredentials-file: {WORKDIR}/tunnel.json\nprotocol: http2\ningress:\n  - hostname: {ARGO_DOMAIN}\n    service: http://localhost:{ARGO_PORT}\n    originRequest:\n      noTLSVerify: true\n  - service: http_status:404"
                 with open(f"{WORKDIR}/tunnel.yml", "w") as f: f.write(yml)
                 start_process(f"./bot tunnel --config tunnel.yml run")
-                generate_nodes(ARGO_DOMAIN) # 固定域名直接生成
+                generate_nodes(ARGO_DOMAIN) 
             else:
                 start_process(f"./bot tunnel --no-autoupdate run --token {ARGO_AUTH}")
                 if ARGO_DOMAIN: generate_nodes(ARGO_DOMAIN)
@@ -170,16 +174,14 @@ def main():
     # 1. 首次运行初始化
     if "init_ok" not in st.session_state:
         init_env()
-        # 先生成一个占位节点，防止 UI 报错
-        generate_nodes("WAITING_FOR_TUNNEL.com") 
         prepare_binaries()
-        generate_config() # 这里的名字现在和定义一致了
+        generate_config()
         run_services()
         st.session_state["init_ok"] = True
         st.toast("Services Started")
 
     # 2. 尝试从日志获取 Argo 域名
-    argo_url = "Scanning logs..."
+    argo_url = "Scanning..."
     if ARGO_DOMAIN:
         argo_url = ARGO_DOMAIN
     elif os.path.exists(LOG_FILE):
@@ -190,8 +192,7 @@ def main():
                 if match:
                     domain = match.group(0).replace("https://", "")
                     argo_url = domain
-                    # 发现新域名，更新节点文件
-                    # 读取 list.txt 判断是否已经是该域名，避免重复写入
+                    # 发现新域名，避免重复生成
                     current_node = ""
                     if os.path.exists(LIST_FILE):
                         with open(LIST_FILE, "r") as lf: current_node = lf.read()
@@ -200,46 +201,30 @@ def main():
                         generate_nodes(domain)
         except: pass
 
-    # 3. 显示区域
+    # 3. 显示区域 (简洁版)
     col1, col2 = st.columns(2)
     
     with col1:
         st.subheader("📡 Status")
-        st.info(f"**Argo Domain:** {argo_url}")
-        st.info(f"**Komari:** {'✅ Configured' if KOMARI_HOST else '❌ Not Configured'}")
+        st.success(f"**Argo Domain:** {argo_url}")
+        st.info(f"**Komari:** {'✅ Online' if KOMARI_HOST else '❌ Not Configured'}")
         
-        # 显示工作目录文件列表 (调试神器)
-        st.subheader("📂 File System Check")
-        try:
-            files = os.listdir(WORKDIR)
-            st.code(f"Files in {WORKDIR}:\n" + "\n".join(files))
-        except Exception as e:
-            st.error(f"Cannot read dir: {e}")
+        # 显示 Base64 订阅内容供复制
+        if os.path.exists(SUB_FILE):
+            st.text_input("Subscription URL (Auto-copy)", f"https://{argo_url}/sub" if "trycloudflare" in argo_url else "Check Logs")
+            with open(SUB_FILE, "r") as f:
+                st.text_area("Base64 Subscription", f.read(), height=100)
 
     with col2:
-        st.subheader("🚀 Node Links (list.txt)")
+        st.subheader("🚀 Node Links")
         if os.path.exists(LIST_FILE):
             with open(LIST_FILE, "r") as f:
                 st.code(f.read(), language="text")
         else:
-            st.error(f"list.txt not found at {LIST_FILE}")
-            
-        st.subheader("📜 Subscription (Base64)")
-        if os.path.exists(SUB_FILE):
-            with open(SUB_FILE, "r") as f:
-                st.text_area("Sub Content", f.read(), height=100)
-
-    # 4. 完整日志
-    with st.expander("查看完整后台日志 (Full Logs)", expanded=True):
-        if os.path.exists(LOG_FILE):
-            with open(LOG_FILE, "r") as f:
-                lines = f.readlines()
-                st.code("".join(lines[-30:]))
-        else:
-            st.write("No logs yet.")
+            st.warning("Waiting for Argo Tunnel...")
 
     # 自动刷新
-    time.sleep(3)
+    time.sleep(5)
     st.rerun()
 
 if __name__ == "__main__":
