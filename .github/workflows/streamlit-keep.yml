@@ -8,52 +8,43 @@ on:
 jobs:
   wakeup:
     runs-on: ubuntu-latest
-    # 【核心逻辑】
-    # 1. 如果是手动触发 (workflow_dispatch) -> 运行
-    # 2. 如果是 Webhook 触发，且监控名称是 'streamlit' -> 运行
-    # 注意：Komari 的“测试”按钮发送的名称通常是 "Example Monitor"，会被跳过，这是正常的。
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.client_payload.monitor_name == 'streamlit' }}
+    
+    # 【测试模式】暂时注释掉下面这行判断，允许任何名字触发
+    # if: ${{ github.event_name == 'workflow_dispatch' || github.event.client_payload.monitor_name == 'streamlit' }}
 
     steps:
-      # 1. 打印调试信息 (方便你排查收到了什么数据)
-      - name: 🔍 调试信息
+      - name: 🔍 调试信息 (查看收到的 Payload)
         run: |
+          echo "🎉 成功触发！"
           echo "触发来源: ${{ github.event_name }}"
           echo "收到的监控名称: '${{ github.event.client_payload.monitor_name }}'"
           echo "报警状态: ${{ github.event.client_payload.status }}"
 
-      # 2. 检出代码
       - name: 📥 检出代码
         uses: actions/checkout@v4
 
-      # 3. 准备浏览器环境 (唤醒 Streamlit 必须)
       - name: 🌐 设置 Chrome 浏览器
         uses: browser-actions/setup-chrome@v1
         with:
           chrome-version: stable
 
-      # 4. 准备 Python
       - name: 🐍 设置 Python 3.10
         uses: actions/setup-python@v5
         with:
           python-version: "3.10"
 
-      # 5. 安装依赖
       - name: 📦 安装依赖库
         run: |
           python -m pip install --upgrade pip
           pip install selenium webdriver-manager
 
-      # 6. 运行唤醒脚本
       - name: 🚀 执行唤醒
         env:
-          # 必须在仓库 Settings -> Secrets 中配置这个变量
           STREAMLIT_APP_URL: ${{ secrets.STREAMLIT_APP_URL }}
         run: |
           if [ -f "keep/streamlit-keep.py" ]; then
             python keep/streamlit-keep.py
           else
             echo "❌ 错误: 找不到 keep/streamlit-keep.py 文件"
-            ls -R
             exit 1
           fi
