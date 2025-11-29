@@ -9,8 +9,11 @@ jobs:
   wakeup:
     runs-on: ubuntu-latest
     
-    # 【测试模式】暂时注释掉下面这行判断，允许任何名字触发
-    # if: ${{ github.event_name == 'workflow_dispatch' || github.event.client_payload.monitor_name == 'streamlit' }}
+    # 【生产模式已启用】
+    # 只有满足以下任一条件才运行：
+    # 1. 是手动点击触发的
+    # 2. 是 Webhook 触发，且监控名称(monitor_name) 必须等于 'streamlit'
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.client_payload.monitor_name == 'streamlit' }}
 
     steps:
       - name: 🔍 调试信息 (查看收到的 Payload)
