@@ -3,24 +3,20 @@ name: Streamlit 自动唤醒
 on:
   workflow_dispatch:          # 允许手动按钮触发
   repository_dispatch:        # 允许 Webhook 触发
-    types: [service-down-alert] # 对应 Webhook Body 中的 event_type
-  # schedule:                 # (可选) 定时保活
-  #   - cron: '0 */4 * * *'   # 每4小时运行一次
+    types: [service-down-alert]
 
 jobs:
   wakeup:
     runs-on: ubuntu-latest
-    
+    # 【核心修改】只在手动触发，或者监控名称为 'streamlit' 时才运行
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.client_payload.monitor_name == 'streamlit' }}
+
     steps:
-      - name: 1. 检查触发来源
+      - name: 1. 记录触发来源
         run: |
+          echo "触发来源: ${{ github.event_name }}"
           if [[ "${{ github.event_name }}" == "repository_dispatch" ]]; then
-            echo "📢 触发类型: Webhook 通知 (服务离线)"
-            echo "📝 事件内容: ${{ github.event.client_payload.message }}"
-          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            echo "👆 触发类型: 手动触发"
-          else
-            echo "⏰ 触发类型: 定时任务"
+            echo "报警的机器名称: ${{ github.event.client_payload.monitor_name }}"
           fi
 
       - name: 2. 检出代码
@@ -31,27 +27,25 @@ jobs:
         with:
           python-version: "3.10"
 
-      # Streamlit 唤醒需要真实的浏览器环境
-      - name: 4. 设置 Chrome 浏览器
+      - name: 4. 设置 Chrome 浏览器 (Selenium 需要)
         uses: browser-actions/setup-chrome@v1
         with:
           chrome-version: stable
 
-      - name: 5. 安装依赖 (Selenium)
+      - name: 5. 安装依赖
         run: |
           python -m pip install --upgrade pip
-          # 如果你的仓库里没有 requirements.txt，可以直接在这里安装
           pip install selenium webdriver-manager
 
       - name: 6. 执行唤醒脚本
         env:
-          # 请确保在 GitHub 仓库 Settings -> Secrets 中设置了此变量
+          # 确保你在 GitHub 仓库 Secrets 里填了你的 Streamlit 网址
           STREAMLIT_APP_URL: ${{ secrets.STREAMLIT_APP_URL }}
         run: |
-          # 确保 keep 目录存在，如果你的脚本在根目录，去掉 keep/
+          # 这里假设你的脚本在 keep 文件夹下，名字叫 streamlit-keep.py
           if [ -f "keep/streamlit-keep.py" ]; then
             python keep/streamlit-keep.py
           else
-            echo "❌ 错误: 找不到唤醒脚本 keep/streamlit-keep.py"
+            echo "❌ 找不到唤醒脚本，请检查文件路径"
             exit 1
           fi
