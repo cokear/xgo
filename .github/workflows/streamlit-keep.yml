@@ -1,47 +1,57 @@
 name: Streamlit 自动唤醒
 
 on:
-  workflow_dispatch:
-  repository_dispatch:
-   types: [service-down-alert]
-  #schedule:
-   #  - cron: '0 0 * * *' # 每天 UTC 00:00 运行
+  workflow_dispatch:          # 允许手动按钮触发
+  repository_dispatch:        # 允许 Webhook 触发
+    types: [service-down-alert] # 对应 Webhook Body 中的 event_type
+  # schedule:                 # (可选) 定时保活
+  #   - cron: '0 */4 * * *'   # 每4小时运行一次
 
 jobs:
   wakeup:
     runs-on: ubuntu-latest
-
+    
     steps:
-      - name: 检查触发事件
+      - name: 1. 检查触发来源
         run: |
-          echo "Workflow triggered by: ${{ github.event_name }}"
           if [[ "${{ github.event_name }}" == "repository_dispatch" ]]; then
-            echo "触发事件类型 (Event Type): ${{ github.event.action }}"
-            echo "收到来自 Uptime Kuma 的下线通知，开始执行自动唤醒流程..."
+            echo "📢 触发类型: Webhook 通知 (服务离线)"
+            echo "📝 事件内容: ${{ github.event.client_payload.message }}"
           elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            echo "工作流被手动触发，开始执行唤醒..."
+            echo "👆 触发类型: 手动触发"
           else
-            echo "工作流由计划任务触发，开始执行唤醒..."
+            echo "⏰ 触发类型: 定时任务"
           fi
 
-      - name: 检出仓库代码
+      - name: 2. 检出代码
         uses: actions/checkout@v4
 
-      - name: 安装 Chromium
-        uses: browser-actions/setup-chromium@v2
-        
-      - name: 设置 Python 环境
+      - name: 3. 设置 Python 环境
         uses: actions/setup-python@v5
         with:
           python-version: "3.10"
 
-      - name: 安装 Python 依赖
+      # Streamlit 唤醒需要真实的浏览器环境
+      - name: 4. 设置 Chrome 浏览器
+        uses: browser-actions/setup-chrome@v1
+        with:
+          chrome-version: stable
+
+      - name: 5. 安装依赖 (Selenium)
         run: |
           python -m pip install --upgrade pip
-          pip install -r keep/requirements.txt
+          # 如果你的仓库里没有 requirements.txt，可以直接在这里安装
+          pip install selenium webdriver-manager
 
-      - name: 执行 Streamlit 唤醒脚本
+      - name: 6. 执行唤醒脚本
         env:
+          # 请确保在 GitHub 仓库 Settings -> Secrets 中设置了此变量
           STREAMLIT_APP_URL: ${{ secrets.STREAMLIT_APP_URL }}
         run: |
-          python keep/streamlit-keep.py
+          # 确保 keep 目录存在，如果你的脚本在根目录，去掉 keep/
+          if [ -f "keep/streamlit-keep.py" ]; then
+            python keep/streamlit-keep.py
+          else
+            echo "❌ 错误: 找不到唤醒脚本 keep/streamlit-keep.py"
+            exit 1
+          fi
