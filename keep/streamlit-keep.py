@@ -15,14 +15,15 @@ logger = logging.getLogger(__name__)
 
 class StreamlitAppWaker:
     """
-    针对Streamlit应用的自动唤醒脚本 (调试增强版)
+    针对Streamlit应用的自动唤醒脚本 (调试增强版 + Shadow DOM 支持)
     """
     
-    APP_URL = os.environ.get("STREAMLIT_APP_URL", "https://idralguxkuj6pvd8sukcww.streamlit.app/")
-    INITIAL_WAIT_TIME = 15  # 增加初始等待时间，防止加载过慢
+    APP_URL = os.environ.get("STREAMLIT_APP_URL", "https://idralguxkuj6pvd8sukcww.streamlit.app")
+    INITIAL_WAIT_TIME = 15
     POST_CLICK_WAIT_TIME = 20
-    # 使用 contains(., ...) 可以匹配子元素文本，比 contains(text(), ...) 更稳健
-    BUTTON_SELECTOR = "//button[contains(., 'Yes, get this app back up')]"
+    TARGET_TEXT = "Yes, get this app back up"
+    # 普通 XPath 定位
+    BUTTON_SELECTOR = f"//button[contains(., '{TARGET_TEXT}')]"
     
     def __init__(self):
         self.driver = None
@@ -40,7 +41,7 @@ class StreamlitAppWaker:
             chrome_options.add_argument('--disable-gpu')
             chrome_options.add_argument('--window-size=1920,1080')
         else:
-            # 本地调试时，如果不想看浏览器弹窗，可以取消下面注释
+            # 本地调试可以注释掉 headless
             # chrome_options.add_argument('--headless') 
             pass
 
@@ -48,7 +49,6 @@ class StreamlitAppWaker:
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option('useAutomationExtension', False)
         chrome_options.add_argument('--ignore-certificate-errors')
-        # 允许不安全的内容，防止某些资源加载失败
         chrome_options.add_argument('--allow-running-insecure-content')
         
         try:
@@ -81,87 +81,117 @@ class StreamlitAppWaker:
         except Exception as e:
             logger.warning(f"⚠️ 无法保存页面源码: {e}")
 
-    def log_visible_buttons(self):
-        """[调试用] 打印当前页面所有可见按钮的文本"""
+    def check_page_text_content(self):
+        """检查页面纯文本中是否包含唤醒关键词"""
         try:
-            buttons = self.driver.find_elements(By.TAG_NAME, "button")
-            visible_texts = [b.text.strip() for b in buttons if b.is_displayed() and b.text.strip()]
-            if visible_texts:
-                logger.info(f"🧐 [DEBUG] 当前页面发现的可见按钮: {visible_texts}")
+            body_text = self.driver.find_element(By.TAG_NAME, "body").text
+            if self.TARGET_TEXT in body_text:
+                logger.info(f"👀 [文本检查] 页面文本中发现了关键词: '{self.TARGET_TEXT}' -> 说明应用确实在休眠。")
+                return True
             else:
-                logger.info("🧐 [DEBUG] 当前页面没有找到可见的 <button> 标签。")
-        except Exception:
-            pass
+                logger.info(f"👀 [文本检查] 页面文本中未发现关键词。")
+                return False
+        except Exception as e:
+            logger.warning(f"⚠️ 无法获取页面文本: {e}")
+            return False
 
-    def wait_for_element_clickable(self, by, value, timeout=10):
-        return WebDriverWait(self.driver, timeout).until(
-            EC.element_to_be_clickable((by, value))
-        )
-    
+    def click_shadow_dom_button(self):
+        """
+        使用 JavaScript 递归查找 Shadow DOM 中的按钮并点击
+        这是解决 '找到 visible button' 问题的关键
+        """
+        logger.info("🕵️‍♂️ 启动 Shadow DOM 深度扫描...")
+        
+        js_script = """
+        function findAndClickButton(root) {
+            // 1. 查找当前 root 下的按钮
+            let buttons = Array.from(root.querySelectorAll('button'));
+            for (let btn of buttons) {
+                if (btn.innerText.includes(arguments[0])) {
+                    console.log("Found button in Shadow DOM!");
+                    btn.click();
+                    return true;
+                }
+            }
+            
+            // 2. 递归查找所有子元素的 shadowRoot
+            let allElements = Array.from(root.querySelectorAll('*'));
+            for (let el of allElements) {
+                if (el.shadowRoot) {
+                    if (findAndClickButton(el.shadowRoot)) return true;
+                }
+            }
+            return false;
+        }
+        return findAndClickButton(document);
+        """
+        
+        try:
+            found = self.driver.execute_script(js_script, self.TARGET_TEXT)
+            if found:
+                logger.info("✅ 通过 JavaScript 在 Shadow DOM 中找到并点击了按钮！")
+                return True
+            else:
+                logger.info("❌ Shadow DOM 深度扫描也未找到按钮。")
+                return False
+        except Exception as e:
+            logger.error(f"❌ 执行 Shadow DOM 脚本时出错: {e}")
+            return False
+
     def find_and_click_button(self, context_description="主页面"):
         logger.info(f"🔍 尝试在 {context_description} 查找唤醒按钮...")
         
+        # 1. 尝试常规方法
         try:
-            # 缩短这里的超时，因为我们会重试或者切iframe
-            button = WebDriverWait(self.driver, 5).until(
+            button = WebDriverWait(self.driver, 3).until(
                 EC.element_to_be_clickable((By.XPATH, self.BUTTON_SELECTOR))
             )
-            
             if button.is_displayed() and button.is_enabled():
-                # 尝试滚动到元素位置，防止被遮挡
                 self.driver.execute_script("arguments[0].scrollIntoView(true);", button)
                 time.sleep(1) 
                 button.click()
-                logger.info(f"✅ 在 {context_description} 成功点击唤醒按钮。")
+                logger.info(f"✅ 在 {context_description} 使用常规方法点击成功。")
                 return True
-            else:
-                logger.warning(f"⚠️ 在 {context_description} 找到按钮，但不可交互。")
-                return False
-
         except TimeoutException:
-            logger.info(f"❌ 在 {context_description} 未找到唤醒按钮。")
-            return False
-        except Exception as e:
-            logger.error(f"❌ 在 {context_description} 点击按钮异常: {e}")
-            return False
-
-    def is_app_woken_up(self):
-        logger.info("🧐 检查唤醒按钮是否已消失...")
-        self.driver.switch_to.default_content()
-        try:
-            WebDriverWait(self.driver, 5).until(
-                EC.presence_of_element_located((By.XPATH, self.BUTTON_SELECTOR))
-            )
-            logger.info("❌ 唤醒按钮仍在主页面显示。")
-            return False
-        except TimeoutException:
-            # 主页面没有，检查iframe
             pass
-            
-        try:
-            iframes = self.driver.find_elements(By.TAG_NAME, "iframe")
-            if not iframes:
-                return True
+        except Exception as e:
+            logger.warning(f"⚠️ 常规点击尝试失败: {e}")
 
-            for iframe in iframes:
-                self.driver.switch_to.frame(iframe)
-                try:
-                    WebDriverWait(self.driver, 1).until(
-                        EC.presence_of_element_located((By.XPATH, self.BUTTON_SELECTOR))
-                    )
-                    self.driver.switch_to.default_content()
-                    logger.info("❌ 唤醒按钮在 iframe 内仍显示。")
-                    return False
-                except TimeoutException:
-                    self.driver.switch_to.default_content()
-            
-            logger.info("✅ 应用唤醒成功，按钮已消失。")
+        # 2. 尝试 Shadow DOM 方法 (如果常规方法失败)
+        if self.click_shadow_dom_button():
+            logger.info(f"✅ 在 {context_description} 使用 Shadow DOM 方法点击成功。")
             return True
 
-        except Exception as e:
-            self.driver.switch_to.default_content()
-            logger.error(f"❌ 检查状态异常: {e}")
+        logger.info(f"❌ 在 {context_description} 所有方法均尝试失败。")
+        return False
+
+    def is_app_woken_up(self):
+        """
+        判断是否唤醒：
+        1. 检查是否还能找到按钮（常规+Shadow DOM）
+        2. 检查页面文本是否还包含关键词
+        """
+        logger.info("🧐 检查唤醒状态...")
+        self.driver.switch_to.default_content()
+        
+        # 如果文本里还有那句话，说明肯定没醒
+        if self.check_page_text_content():
+            logger.info("❌ 唤醒关键词仍在页面文本中，应用未唤醒。")
             return False
+            
+        # 再次确认是否有按钮存在
+        try:
+            # 简单检查常规 DOM
+            WebDriverWait(self.driver, 2).until(
+                EC.presence_of_element_located((By.XPATH, self.BUTTON_SELECTOR))
+            )
+            logger.info("❌ 唤醒按钮仍在 DOM 中。")
+            return False
+        except TimeoutException:
+            pass
+            
+        logger.info("✅ 关键词消失且找不到按钮，判定唤醒成功。")
+        return True
 
     def wakeup_app(self):
         if not self.APP_URL:
@@ -169,19 +199,22 @@ class StreamlitAppWaker:
             
         logger.info(f"👉 访问: {self.APP_URL}")
         self.driver.get(self.APP_URL)
-        
-        # 打印调试信息
         logger.info(f"📄 Page Title: {self.driver.title}")
-        logger.info(f"🔗 Current URL: {self.driver.current_url}")
         
         logger.info(f"⏳ 等待加载 {self.INITIAL_WAIT_TIME} 秒...")
         time.sleep(self.INITIAL_WAIT_TIME)
         
-        # 调试：打印所有可见按钮，看看是否有文案变动
-        self.log_visible_buttons()
+        # 1. 先看一眼页面上有没有那句话，如果没有，可能根本不需要唤醒
+        has_text = self.check_page_text_content()
+        if not has_text:
+            logger.info("⚠️ 页面初次加载后未发现唤醒关键词。可能应用已唤醒，或页面加载完全失败。")
+            # 这种情况下，我们再截图确认一下，但如果不抛错，流程会继续
+            self.save_debug_artifacts("no_text_found")
         
+        # 2. 尝试点击 (主页面)
         click_success = self.find_and_click_button("主页面")
         
+        # 3. 尝试点击 (iframe)
         if not click_success:
             logger.info("👉 尝试进入 iframe 查找...")
             try:
@@ -191,9 +224,6 @@ class StreamlitAppWaker:
                 for i, iframe in enumerate(iframes):
                     try:
                         self.driver.switch_to.frame(iframe)
-                        # 在iframe里也打印一下按钮
-                        self.log_visible_buttons()
-                        
                         if self.find_and_click_button(f"iframe[{i+1}]"):
                             click_success = True
                             break
@@ -205,22 +235,26 @@ class StreamlitAppWaker:
                 logger.error(f"❌ iframe 处理全流程出错: {e}")
                 
         if not click_success:
-            # 保存失败现场
-            self.save_debug_artifacts("not_found")
+            # 如果之前检测到了文本，但现在没点到按钮，那是严重的定位失败
+            if has_text:
+                self.save_debug_artifacts("click_failed_but_text_exists")
+                return False, "❌ 检测到休眠文本，但无法定位或点击按钮（Shadow DOM 扫描也失败）。"
             
+            # 如果没检测到文本，也没点到按钮，可能应用本来就是醒的
             if self.is_app_woken_up():
-                return True, "✅ 应用似乎已是唤醒状态。" 
+                return True, "✅ 应用似乎已是唤醒状态（未发现休眠文本）。" 
             else:
-                return False, "⚠️ 找不到按钮。请查看生成的 debug_not_found_*.png 截图排查原因。"
+                self.save_debug_artifacts("unknown_state")
+                return False, "⚠️ 状态未知：未找到按钮，但也未通过唤醒检查。"
         
-        logger.info(f"⏳ 等待应用启动 {self.POST_CLICK_WAIT_TIME} 秒...")
+        logger.info(f"⏳ 点击成功，等待应用启动 {self.POST_CLICK_WAIT_TIME} 秒...")
         time.sleep(self.POST_CLICK_WAIT_TIME)
         
         if self.is_app_woken_up():
             return True, "✅ 唤醒成功！"
         else:
             self.save_debug_artifacts("still_sleeping")
-            return False, "❌ 点击后按钮未消失，可能唤醒失败。请查看 debug_still_sleeping_*.png。"
+            return False, "❌ 点击后应用似乎仍未唤醒。"
 
     def run(self):
         try:
