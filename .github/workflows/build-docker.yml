@@ -1,49 +1,46 @@
-name: Streamlit 自动唤醒
+name: Build and Push Docker Image
 
 on:
-  workflow_dispatch:          # 允许手动按钮触发
-  repository_dispatch:        # 允许 Webhook 触发
-    types: [service-down-alert]
+  push:
+    branches: [ main ]
+    paths:
+      - 'Dockerfile'
+      - 'app.py'
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
-  wakeup:
+  build:
     runs-on: ubuntu-latest
-    
+    permissions:
+      contents: read
+      packages: write
+
     steps:
-      - name: 📥 检出代码
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: 🌐 设置 Chrome 浏览器
-        uses: browser-actions/setup-chrome@v1
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
         with:
-          chrome-version: stable
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 🐍 设置 Python 3.10
-        uses: actions/setup-python@v5
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
         with:
-          python-version: "3.10"
-
-      - name: 📦 安装依赖库
-        run: |
-          python -m pip install --upgrade pip
-          pip install selenium webdriver-manager
-
-      - name: 🚀 判断并执行
-        env:
-          STREAMLIT_APP_URL: ${{ secrets.STREAMLIT_APP_URL }}
-          ALARM_MSG: ${{ github.event.client_payload.message }}
-          EVENT_NAME: ${{ github.event_name }}
-        run: |
-          # 逻辑：如果是手动触发，或者报警消息里包含 "streamlit"，则运行脚本
-          if [[ "$EVENT_NAME" == "workflow_dispatch" ]] || echo "$ALARM_MSG" | grep -iq "streamlit"; then
-            echo "✅ 触发条件满足，正在执行唤醒脚本..."
-            
-            if [ -f "keep/streamlit-keep.py" ]; then
-              python keep/streamlit-keep.py
-            else
-              echo "❌ 错误: 找不到 keep/streamlit-keep.py 文件"
-              exit 1
-            fi
-          else
-            echo "🛑 忽略非目标报警 (消息未包含 'streamlit')"
-          fi
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/python:latest
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.description=Python Server
+            org.opencontainers.image.licenses=MIT
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
