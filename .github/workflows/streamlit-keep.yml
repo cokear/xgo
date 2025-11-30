@@ -1,53 +1,40 @@
-name: Streamlit 自动唤醒
+name: Streamlit 自动唤醒 (调试模式)
 
 on:
-  workflow_dispatch:          # 允许手动按钮触发
-  repository_dispatch:        # 允许 Webhook 触发
+  workflow_dispatch:
+  repository_dispatch:
     types: [service-down-alert]
 
 jobs:
   wakeup:
     runs-on: ubuntu-latest
+    # 【重点】我把 if 判断删掉了！现在只要有通知，它就会运行！
     
-    # 【生产模式已启用】
-    # 只有满足以下任一条件才运行：
-    # 1. 是手动点击触发的
-    # 2. 是 Webhook 触发，且监控名称(monitor_name) 必须等于 'streamlit'
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.client_payload.monitor_name == 'streamlit' }}
-
     steps:
-      - name: 🔍 调试信息 (查看收到的 Payload)
+      - name: 🔍 捉妖镜 - 查看真实数据
         run: |
-          echo "🎉 成功触发！"
-          echo "触发来源: ${{ github.event_name }}"
-          echo "收到的监控名称: '${{ github.event.client_payload.monitor_name }}'"
-          echo "报警状态: ${{ github.event.client_payload.status }}"
-
-      - name: 📥 检出代码
-        uses: actions/checkout@v4
-
-      - name: 🌐 设置 Chrome 浏览器
-        uses: browser-actions/setup-chrome@v1
-        with:
-          chrome-version: stable
-
-      - name: 🐍 设置 Python 3.10
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
-
-      - name: 📦 安装依赖库
-        run: |
-          python -m pip install --upgrade pip
-          pip install selenium webdriver-manager
-
-      - name: 🚀 执行唤醒
+          echo "========================================"
+          echo "GitHub 收到的完整数据："
+          echo "监控名称 (monitor_name): '${{ github.event.client_payload.monitor_name }}'"
+          echo "报警标题 (title): '${{ github.event.client_payload.title }}'"
+          echo "报警状态 (status): '${{ github.event.client_payload.status }}'"
+          echo "========================================"
+          
+      # 为了防止名字不对导致误操作，我们在脚本执行前再做一次手动检查
+      - name: 🚀 尝试执行唤醒
         env:
           STREAMLIT_APP_URL: ${{ secrets.STREAMLIT_APP_URL }}
+          # 把收到的名字传给下一步
+          RECEIVED_NAME: ${{ github.event.client_payload.monitor_name }}
         run: |
-          if [ -f "keep/streamlit-keep.py" ]; then
-            python keep/streamlit-keep.py
+          # 这里用 Shell 脚本做判断，如果不匹配打印出来让我们看到
+          if [[ "$RECEIVED_NAME" == "streamlit" ]]; then
+             echo "✅ 名字完全匹配，开始执行 Python 脚本..."
+             # 此处为了调试，先不真的运行，或者你可以保留运行
+             # python keep/streamlit-keep.py
           else
-            echo "❌ 错误: 找不到 keep/streamlit-keep.py 文件"
-            exit 1
+             echo "❌ 名字不匹配！"
+             echo "Komari 发来的名字是: [$RECEIVED_NAME]"
+             echo "GitHub 等待的名字是: [streamlit]"
+             echo "请去修改 Komari 监控项名称，或者修改 YAML 里的判断条件。"
           fi
