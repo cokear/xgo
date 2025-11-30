@@ -18,7 +18,7 @@ class StreamlitAppWaker:
     针对Streamlit应用的自动唤醒脚本 (调试增强版)
     """
     
-    APP_URL = os.environ.get("STREAMLIT_APP_URL", "")
+    APP_URL = os.environ.get("STREAMLIT_APP_URL", "https://idralguxkuj6pvd8sukcww.streamlit.app/")
     INITIAL_WAIT_TIME = 15  # 增加初始等待时间，防止加载过慢
     POST_CLICK_WAIT_TIME = 20
     # 使用 contains(., ...) 可以匹配子元素文本，比 contains(text(), ...) 更稳健
