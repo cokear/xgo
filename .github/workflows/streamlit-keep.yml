@@ -1,46 +1,75 @@
+name: Streamlit 自动唤醒
+
+on:
+  workflow_dispatch:          # 允许手动按钮触发
+  repository_dispatch:        # 允许 Webhook 触发
+    types: [service-down-alert]
+
 jobs:
   wakeup:
     runs-on: ubuntu-latest
-    # 移除之前的 if，因为我们要进到步骤里去打印调试
     
     steps:
+      # 1. 打印调试信息 (看看 Komari 到底发来了什么)
       - name: 🔍 调试信息
         run: |
-          echo "GitHub 收到的消息内容: '${{ github.event.client_payload.message }}'"
+          echo "触发来源: ${{ github.event_name }}"
+          echo "收到的消息内容: '${{ github.event.client_payload.message }}'"
 
+      # 2. 检出代码
       - name: 📥 检出代码
         uses: actions/checkout@v4
 
-      - name: 🌐 设置 Chrome & Python & 依赖
+      # 3. 准备浏览器环境 (唤醒 Streamlit 必须)
+      - name: 🌐 设置 Chrome 浏览器
         uses: browser-actions/setup-chrome@v1
         with:
           chrome-version: stable
-      - uses: actions/setup-python@v5
+
+      # 4. 准备 Python
+      - name: 🐍 设置 Python 3.10
+        uses: actions/setup-python@v5
         with:
           python-version: "3.10"
-      - run: |
+
+      # 5. 安装依赖
+      - name: 📦 安装依赖库
+        run: |
           python -m pip install --upgrade pip
           pip install selenium webdriver-manager
 
-      - name: 🚀 执行唤醒
+      # 6. 核心逻辑：判断是否需要执行唤醒
+      - name: 🚀 判断并执行
         env:
+          # 必须在仓库 Secrets 里配置 STREAMLIT_APP_URL
           STREAMLIT_APP_URL: ${{ secrets.STREAMLIT_APP_URL }}
           # 获取消息内容
           ALARM_MSG: ${{ github.event.client_payload.message }}
+          # 获取触发类型
+          EVENT_NAME: ${{ github.event_name }}
         run: |
-          # 【核心修改】使用 grep 搜索消息里是否包含 "streamlit" (忽略大小写)
-          if echo "$ALARM_MSG" | grep -iq "streamlit"; then
-            echo "✅ 在消息中检测到 'streamlit'，确认为目标服务离线！"
-            echo "正在启动唤醒脚本..."
+          echo "正在分析触发条件..."
+          
+          # 逻辑判断：
+          # 1. 如果是手动触发 (workflow_dispatch) -> 直接运行
+          # 2. 如果消息内容($ALARM_MSG)里包含 "streamlit" (grep -iq 忽略大小写) -> 运行
+          
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]] || echo "$ALARM_MSG" | grep -iq "streamlit"; then
+            
+            echo "✅ 条件满足！(手动触发 或 检测到关键词 'streamlit')"
+            echo "正在启动 Python 唤醒脚本..."
             
             if [ -f "keep/streamlit-keep.py" ]; then
               python keep/streamlit-keep.py
             else
-              echo "❌ 错误: 找不到唤醒脚本"
+              echo "❌ 严重错误: 找不到 keep/streamlit-keep.py 文件！"
+              echo "当前目录文件列表:"
+              ls -R
               exit 1
             fi
             
           else
-            echo "🛑 消息中未包含 'streamlit'，跳过执行。"
-            echo "收到的消息是: [$ALARM_MSG]"
+            echo "🛑 条件不满足，跳过执行。"
+            echo "原因: 这是一个 Webhook 报警，但消息内容里没找到 'streamlit'。"
+            echo "收到的消息全文: [$ALARM_MSG]"
           fi
