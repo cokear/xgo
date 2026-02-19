@@ -9,6 +9,7 @@ import requests
 import platform
 import subprocess
 import threading
+from flask import Flask, Response
 
 # 环境变量
 UPLOAD_URL = os.environ.get("UPLOAD_URL", "")  # 节点或订阅上传地址
@@ -16,12 +17,12 @@ PROJECT_URL = os.environ.get("PROJECT_URL", "")  # 项目url
 AUTO_ACCESS = os.environ.get("AUTO_ACCESS", "false").lower() == "true"  # 保活
 FILE_PATH = os.environ.get("FILE_PATH", "./sub")  # 节点路径
 SUB_PATH = os.environ.get("SUB_PATH", "sub")  # 订阅token
-UUID = os.environ.get("UUID", "20e6e496-cf19-45c8-b883-14f5e11cd9f1")  # UUID
-NEZHA_SERVER = os.environ.get("NEZHA_SERVER", "")  # 哪吒面板域名
+UUID = os.environ.get("UUID", "9d3010d1-f211-4f91-b170-31d31a55460f")  # UUID
+NEZHA_SERVER = os.environ.get("NEZHA_SERVER", "nz.ccc.gv.uy:443")  # 哪吒面板域名
 NEZHA_PORT = os.environ.get("NEZHA_PORT", "")  # 哪吒端口
-NEZHA_KEY = os.environ.get("NEZHA_KEY", "")  # 哪吒密钥
-ARGO_DOMAIN = os.environ.get("ARGO_DOMAIN", "")  # Argo固定域名
-ARGO_AUTH = os.environ.get("ARGO_AUTH", "")  # Argo密钥
+NEZHA_KEY = os.environ.get("NEZHA_KEY", "Kab9zHqbDXx0rR3tbxFvL36v5Ot1QJ5R")  # 哪吒密钥
+ARGO_DOMAIN = os.environ.get("ARGO_DOMAIN", "stre.61154321.dpdns.org")  # Argo固定域名
+ARGO_AUTH = os.environ.get("ARGO_AUTH", "eyJhIjoiMzM5OTA1ZWFmYjM2OWM5N2M2YjZkYTI4NTgxMjlhMjQiLCJ0IjoiM2VlZTQyNzItZTQwZS00YmUzLThkYzQtMWU0MWFhZmUwNWMxIiwicyI6Ik1USTRaREl5WkRndFpqYzBaaTAwTkdJd0xXSTFaREl0WmpjME5EZ3pNRFV3TkdNMyJ9")  # Argo密钥
 ARGO_PORT = int(os.environ.get("PORT", "8001"))  # Argo监听端口
 CFIP = os.environ.get("CFIP", "cf.090227.xyz")  # 优选ip
 CFPORT = int(os.environ.get("CFPORT", "443"))  # 优选端口
@@ -29,24 +30,36 @@ NAME = os.environ.get("NAME", "Stream")  # 节点名称
 CHAT_ID = os.environ.get("CHAT_ID", "")  # Telegram chat_id
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")  # Telegram bot_token
 
+# Komari 环境变量
+KOMARI_ENDPOINT = os.environ.get("KOMARI_ENDPOINT", "https://km.bcbc.pp.ua/")  # Komari 面板地址
+KOMARI_TOKEN = os.environ.get("KOMARI_TOKEN", "3vvAQAdXAjO8oA1Nl5u25g")  # Komari Agent Token
+
+# 日志配置
+SHOW_LOGS = os.environ.get("SHOW_LOGS", "false").lower() == "true"  # 日志开关
+
+
+# 辅助日志函数
+def script_log(msg):
+  if SHOW_LOGS:
+    with open(run_log_path, "a", encoding="utf-8") as f:
+      f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}\n")
+  # 控制台始终不输出详细日志
 
 # 创建运行目录
 def create_directory():
-  print("\033c", end="")
   if not os.path.exists(FILE_PATH):
     os.makedirs(FILE_PATH)
-    print(f"{FILE_PATH} 已创建")
-  else:
-    print(f"{FILE_PATH} 已存在")
 
 
 # 全局变量路径定义
 npm_path = os.path.join(FILE_PATH, "npm")
 php_path = os.path.join(FILE_PATH, "php")
+komari_path = os.path.join(FILE_PATH, "komari")
 web_path = os.path.join(FILE_PATH, "web")
 bot_path = os.path.join(FILE_PATH, "bot")
 sub_path = os.path.join(FILE_PATH, "sub.txt")
 list_path = os.path.join(FILE_PATH, "list.txt")
+run_log_path = os.path.join(FILE_PATH, "run.log")
 boot_log_path = os.path.join(FILE_PATH, "boot.log")
 config_path = os.path.join(FILE_PATH, "config.json")
 
@@ -88,7 +101,7 @@ def delete_nodes():
 
 # 清理旧文件
 def cleanup_old_files():
-  paths_to_delete = ["web", "bot", "npm", "php", "boot.log", "list.txt"]
+  paths_to_delete = ["web", "bot", "komari", "npm", "php", "boot.log", "run.log", "list.txt", "config.yaml"]
   for file in paths_to_delete:
     file_path = os.path.join(FILE_PATH, file)
     try:
@@ -113,8 +126,11 @@ def get_system_architecture():
 # 根据架构下载文件
 def download_file(file_name, file_url):
   file_path = os.path.join(FILE_PATH, file_name)
+  script_log(f"开始下载 {file_name}: {file_url}")
   try:
-    response = requests.get(file_url, stream=True)
+    if "github.com" in file_url:
+      file_url = f"https://ghfast.top/{file_url}"
+    response = requests.get(file_url, stream=True, timeout=30)
     response.raise_for_status()
     with open(file_path, "wb") as f:
       for chunk in response.iter_content(chunk_size=8192):
@@ -131,9 +147,9 @@ def download_file(file_name, file_url):
 # 获取对应架构的文件列表
 def get_files_for_architecture(architecture):
   base_url = (
-      "https://arm64.ssss.nyc.mn"
+      "https://arm64.eooce.com"
       if architecture == "arm"
-      else "https://amd64.ssss.nyc.mn"
+      else "https://amd64.eooce.com"
   )
 
   # 基础组件：web(核心), bot(隧道)
@@ -146,6 +162,12 @@ def get_files_for_architecture(architecture):
   if NEZHA_SERVER and NEZHA_KEY:
     name, path = ("npm", "agent") if NEZHA_PORT else ("php", "v1")
     files.insert(0, {"fileName": name, "fileUrl": f"{base_url}/{path}"})
+  
+  # 按需添加 Komari 组件
+  if KOMARI_ENDPOINT and KOMARI_TOKEN:
+    k_arch = "arm64" if architecture == "arm" else "amd64"
+    komari_url = f"https://github.com/komari-monitor/komari-agent/releases/latest/download/komari-agent-linux-{k_arch}"
+    files.insert(0, {"fileName": "komari", "fileUrl": komari_url})
 
   return files
 
@@ -157,15 +179,15 @@ def authorize_files(file_paths):
     if os.path.exists(absolute_file_path):
       try:
         os.chmod(absolute_file_path, 0o775)
-        print(f"授权成功: {absolute_file_path} (775)")
+        script_log(f"授权成功: {absolute_file_path} (775)")
       except Exception as e:
-        print(f"授权失败 {absolute_file_path}: {e}")
+        script_log(f"授权失败 {absolute_file_path}: {e}")
 
 
 # 配置 Argo 隧道
 def argo_type():
   if not ARGO_AUTH or not ARGO_DOMAIN:
-    print("ARGO_DOMAIN 或 ARGO_AUTH 变量为空，使用临时隧道")
+    script_log("ARGO_DOMAIN 或 ARGO_AUTH 变量为空，使用临时隧道")
     return
 
   if "TunnelSecret" in ARGO_AUTH:
@@ -188,12 +210,13 @@ ingress:
     with open(os.path.join(FILE_PATH, "tunnel.yml"), "w") as f:
       f.write(tunnel_yml)
   else:
-    print(f"使用 Token 连接隧道，请确保 Cloudflare 中设置了端口 {ARGO_PORT}")
+    script_log(f"使用 Token 连接隧道，请确保 Cloudflare 中设置了端口 {ARGO_PORT}")
 
 
 # 执行 Shell 命令并返回输出
 def exec_cmd(command):
   try:
+    script_log(f"执行命令: {command}")
     process = subprocess.Popen(
         command,
         shell=True,
@@ -204,7 +227,7 @@ def exec_cmd(command):
     stdout, stderr = process.communicate()
     return stdout + stderr
   except Exception as e:
-    print(f"执行命令出错: {e}")
+    script_log(f"执行命令出错: {e}")
     return str(e)
 
 
@@ -219,7 +242,7 @@ async def download_files_and_run():
   # 批量下载
   success = all(download_file(f["fileName"], f["fileUrl"]) for f in files_to_download)
   if not success:
-    print("部分文件下载失败，停止后续操作")
+    script_log("部分文件下载失败，停止后续操作")
     return
   actual_downloaded_files = [f["fileName"] for f in files_to_download]
   authorize_files(actual_downloaded_files)
@@ -360,6 +383,8 @@ uuid: {UUID}"""
           {"protocol": "blackhole", "tag": "block"},
       ],
   }
+  if SHOW_LOGS:
+    config["inbounds"][0]["settings"]["fallbacks"].append({"path": "/logs", "dest": 3005})
   with open(
       os.path.join(FILE_PATH, "config.json"), "w", encoding="utf-8"
   ) as config_file:
@@ -369,37 +394,54 @@ uuid: {UUID}"""
   if NEZHA_SERVER and NEZHA_PORT and NEZHA_KEY:
     tls_ports = ["443", "8443", "2096", "2087", "2083", "2053"]
     nezha_tls = "--tls" if NEZHA_PORT in tls_ports else ""
-    command = f"nohup {os.path.join(FILE_PATH, 'npm')} -s {NEZHA_SERVER}:{NEZHA_PORT} -p {NEZHA_KEY} {nezha_tls} >/dev/null 2>&1 &"
+    log_redir = f">>{run_log_path} 2>&1" if SHOW_LOGS else ">/dev/null 2>&1"
+    command = f"nohup {os.path.join(FILE_PATH, 'npm')} -s {NEZHA_SERVER}:{NEZHA_PORT} -p {NEZHA_KEY} {nezha_tls} {log_redir} &"
 
     try:
       exec_cmd(command)
-      print("npm 正在运行")
+      script_log("npm 正在运行")
       time.sleep(1)
     except Exception as e:
-      print(f"npm 运行错误: {e}")
+      script_log(f"npm 运行错误: {e}")
 
   elif NEZHA_SERVER and NEZHA_KEY:
     # 运行 V1
+    log_redir = f">>{run_log_path} 2>&1" if SHOW_LOGS else ">/dev/null 2>&1"
     command = (
-        f'nohup {FILE_PATH}/php -c "{FILE_PATH}/config.yaml" >/dev/null 2>&1 &'
+        f'nohup {FILE_PATH}/php -c "{FILE_PATH}/config.yaml" {log_redir} &'
     )
     try:
       exec_cmd(command)
-      print("php 正在运行")
+      script_log("php 正在运行")
       time.sleep(1)
     except Exception as e:
-      print(f"php 运行错误: {e}")
+      script_log(f"php 运行错误: {e}")
   else:
-    print("NEZHA 变量为空，跳过运行哪吒")
+    script_log("NEZHA 变量为空，跳过运行哪吒")
+
+  # 运行 Komari
+  if KOMARI_ENDPOINT and KOMARI_TOKEN:
+    komari_args = f"-e {KOMARI_ENDPOINT} -t {KOMARI_TOKEN} --disable-web-ssh --disable-auto-update"
+    log_redir = f">>{run_log_path} 2>&1" if SHOW_LOGS else ">/dev/null 2>&1"
+    command = f"nohup {os.path.join(FILE_PATH, 'komari')} {komari_args} {log_redir} &"
+    try:
+      exec_cmd(command)
+      script_log("komari 正在运行")
+      time.sleep(1)
+    except Exception as e:
+      script_log(f"komari 运行错误: {e}")
+  else:
+    script_log("KOMARI 变量为空，跳过运行 Komari")
 
   # 运行 web (Xray/Sing-box core)
-  command = f"nohup {os.path.join(FILE_PATH, 'web')} -c {os.path.join(FILE_PATH, 'config.json')} >/dev/null 2>&1 &"
+  log_redir = f">>{run_log_path} 2>&1" if SHOW_LOGS else ">/dev/null 2>&1"
+  command = f"nohup {os.path.join(FILE_PATH, 'web')} -c {os.path.join(FILE_PATH, 'config.json')} {log_redir} &"
   try:
     exec_cmd(command)
-    print("web 正在运行")
+    script_log("web 正在运行")
     time.sleep(1)
   except Exception as e:
-    print(f"web 运行错误: {e}")
+    script_log(f"web 运行错误: {e}")
 
   # 运行 cloudflared (bot)
   if os.path.exists(os.path.join(FILE_PATH, "bot")):
@@ -410,12 +452,13 @@ uuid: {UUID}"""
     else:
       args = f"tunnel --edge-ip-version auto --no-autoupdate --protocol http2 --logfile {os.path.join(FILE_PATH, 'boot.log')} --loglevel info --url http://localhost:{ARGO_PORT}"
 
+    log_redir = f">>{run_log_path} 2>&1" if SHOW_LOGS else ">/dev/null 2>&1"
     try:
-      exec_cmd(f"nohup {os.path.join(FILE_PATH, 'bot')} {args} >/dev/null 2>&1 &")
-      print("bot 正在运行")
+      exec_cmd(f"nohup {os.path.join(FILE_PATH, 'bot')} {args} {log_redir} &")
+      script_log("bot 正在运行")
       time.sleep(2)
     except Exception as e:
-      print(f"执行命令出错: {e}")
+      script_log(f"执行命令出错: {e}")
 
   time.sleep(5)
 
@@ -431,7 +474,7 @@ async def extract_domains(retry_count=0):
 
   if ARGO_AUTH and ARGO_DOMAIN:
     argo_domain = ARGO_DOMAIN
-    print(f"Argo 域名: {argo_domain}")
+    script_log(f"Argo 域名: {argo_domain}")
     await generate_links(argo_domain)
   else:
     try:
@@ -450,11 +493,11 @@ async def extract_domains(retry_count=0):
       )
       if domain_match:
         argo_domain = domain_match.group(1)
-        print(f"Argo 域名获取成功: {argo_domain}")
+        script_log(f"Argo 域名获取成功: {argo_domain}")
         await generate_links(argo_domain)
       else:
         if retry_count < max_retries:
-          print(f"未找到 Argo 域名，正在进行第 {retry_count + 1} 次重试...")
+          script_log(f"未找到 Argo 域名，正在进行第 {retry_count + 1} 次重试...")
           if os.path.exists(boot_log_path):
             os.remove(boot_log_path)
           exec_cmd(f"pkill -f {os.path.basename(bot_path)}")
@@ -464,12 +507,12 @@ async def extract_domains(retry_count=0):
           await asyncio.sleep(6)  # 等待启动
           await extract_domains(retry_count + 1)  # 递归调用，次数+1
         else:
-          print(
+          script_log(
               f"已达到最大重试次数 ({max_retries})，Argo 启动失败，请检查网络或参数"
           )
 
     except Exception as e:
-      print(f"读取 boot.log 或重启 bot 出错: {e}")
+      script_log(f"读取 boot.log 或重启 bot 出错: {e}")
 
 
 # 上传节点到订阅服务
@@ -486,7 +529,7 @@ def upload_nodes():
       )
 
       if response.status_code == 200:
-        print("订阅上传成功")
+        script_log("订阅上传成功")
     except Exception as e:
       pass
 
@@ -520,7 +563,7 @@ def upload_nodes():
           headers={"Content-Type": "application/json"},
       )
       if response.status_code == 200:
-        print("节点上传成功")
+        script_log("节点上传成功")
     except:
       return None
   else:
@@ -530,7 +573,7 @@ def upload_nodes():
 # 推送通知到 Telegram
 def send_telegram():
   if not BOT_TOKEN or not CHAT_ID:
-    print("TG 变量为空，跳过推送到 TG")
+    script_log("TG 变量为空，跳过推送到 TG")
     return
 
   try:
@@ -546,9 +589,9 @@ def send_telegram():
     }
 
     requests.post(url, params=params)
-    print("TG 消息发送成功")
+    script_log("TG 消息发送成功")
   except Exception as e:
-    print(f"TG 消息发送失败: {e}")
+    script_log(f"TG 消息发送失败: {e}")
 
 
 # 生成链接和订阅内容
@@ -604,13 +647,13 @@ trojan://{UUID}@{CFIP}:{CFPORT}?security=tls&sni={argo_domain}&fp=chrome&type=ws
   with open(os.path.join(FILE_PATH, "sub.txt"), "w", encoding="utf-8") as sub_file:
     sub_file.write(sub_txt)
 
-  # 强化日志输出，确保能被日志系统捕获
-  print("\n" + "=" * 60, flush=True)
-  print("=== SUB_DATA_START ===", flush=True)
-  print(sub_txt, flush=True)
-  print("=== SUB_DATA_END ===", flush=True)
-  print(f"确认: {os.path.join(FILE_PATH, 'sub.txt')} 保存成功", flush=True)
-  print("=" * 60 + "\n", flush=True)
+  # 仅在日志系统中记录
+  script_log("\n" + "=" * 60)
+  script_log("=== SUB_DATA_START ===")
+  script_log(sub_txt)
+  script_log("=== SUB_DATA_END ===")
+  script_log(f"确认: {os.path.join(FILE_PATH, 'sub.txt')} 保存成功")
+  script_log("=" * 60 + "\n")
 
   # 执行额外操作
   send_telegram()
@@ -619,10 +662,40 @@ trojan://{UUID}@{CFIP}:{CFPORT}?security=tls&sni={argo_domain}&fp=chrome&type=ws
   return sub_txt
 
 
+# 启动日志服务
+def start_log_server():
+  if not SHOW_LOGS:
+    return
+  
+  app = Flask(__name__)
+
+  @app.route("/logs")
+  def get_logs():
+    if not os.path.exists(run_log_path):
+      return "暂无日志文件", 404
+    
+    def generate():
+      with open(run_log_path, "r", encoding="utf-8") as f:
+        # 初始返回所有现有日志
+        yield f.read()
+        # 模拟 tail -f 效果 (简化版)
+        while True:
+          line = f.readline()
+          if not line:
+            time.sleep(1)
+            continue
+          yield line
+          
+    return Response(generate(), mimetype="text/plain")
+
+  print("启动日志服务于 3005 端口...")
+  threading.Thread(target=lambda: app.run(host="127.0.0.1", port=3005, debug=False, use_reloader=False), daemon=True).start()
+
+
 # 添加自动访问任务
 def add_visit_task():
   if not AUTO_ACCESS or not PROJECT_URL:
-    print("跳过添加自动访问任务")
+    script_log("跳过添加自动访问任务")
     return
 
   try:
@@ -633,11 +706,11 @@ def add_visit_task():
       timeout=10
     )
     if response.status_code == 200:
-      print("自动访问任务添加成功")
+      script_log("自动访问任务添加成功")
     else:
-      print(f"自动访问任务添加失败，状态码: {response.status_code}")
+      script_log(f"自动访问任务添加失败，状态码: {response.status_code}")
   except Exception as e:
-    print(f"添加 URL 失败: {e}")
+    script_log(f"添加 URL 失败: {e}")
 
 
 # 300秒后清理文件
@@ -645,7 +718,7 @@ def clean_files():
   def _cleanup():
     time.sleep(300)
     files_to_delete = [
-      boot_log_path, config_path, list_path, web_path, bot_path, php_path, npm_path,
+      boot_log_path, config_path, list_path, web_path, bot_path, php_path, npm_path, komari_path, run_log_path,
       os.path.join(FILE_PATH, "config.yaml"),
       os.path.join(FILE_PATH, "tunnel.json"),
       os.path.join(FILE_PATH, "tunnel.yml"),
@@ -670,7 +743,7 @@ def clean_files():
 
 # 启动服务器的主函数
 async def start_server():
-  components = [os.path.basename(p) for p in [web_path, bot_path, npm_path, php_path]]
+  components = [os.path.basename(p) for p in [web_path, bot_path, npm_path, php_path, komari_path]]
   valid_components = [c for c in components if c]  # 过滤掉空值
   if valid_components:
     pattern = "|".join(valid_components)
@@ -681,10 +754,10 @@ async def start_server():
   create_directory()
   argo_type()
   await download_files_and_run()
+  start_log_server()
   add_visit_task()
   clean_files()
-  print("执行完毕")
-  print(f"\n日志将在 300 秒后删除")
+  script_log("执行完毕")
 
 
 if __name__ == "__main__":
@@ -692,9 +765,9 @@ if __name__ == "__main__":
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     loop.run_until_complete(start_server())
-    print("\n" + "=" * 50)
-    print("后台服务已启动成功！")
-    print("主程序进入保持存活状态 (Ctrl+C 可退出)")
+    print("\033c", end="")
+    print("=" * 50)
+    print("程序正在运行中...")
     print("=" * 50)
     while True:
       time.sleep(60)
