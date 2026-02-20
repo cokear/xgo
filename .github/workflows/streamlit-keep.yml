@@ -5,7 +5,7 @@ on:
   repository_dispatch:
     types: [service-down-alert]
   # schedule:
-  #   - cron: '0 0 * * *' # 每天 UTC 00:00 运行
+  #   - cron: '0 0 * * *' # 每天运行
 
 jobs:
   wakeup:
@@ -17,11 +17,6 @@ jobs:
           echo "Workflow triggered by: ${{ github.event_name }}"
           if [[ "${{ github.event_name }}" == "repository_dispatch" ]]; then
             echo "触发事件类型 (Event Type): ${{ github.event.action }}"
-            echo "收到来自 Uptime Kuma 的下线通知，开始执行自动唤醒流程..."
-          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            echo "工作流被手动触发，开始执行唤醒..."
-          else
-            echo "工作流由计划任务触发，开始执行唤醒..."
           fi
 
       - name: 检出仓库代码
@@ -38,10 +33,25 @@ jobs:
       - name: 安装 Python 依赖
         run: |
           python -m pip install --upgrade pip
-          pip install -r keep/requirements.txt
+          if [ -f "keep/requirements.txt" ]; then
+            pip install -r keep/requirements.txt
+          else
+            pip install selenium webdriver-manager
+          fi
 
       - name: 执行 Streamlit 唤醒脚本
         env:
-          STREAMLIT_APP_URL: ${{ vars.STREAMLIT_APP_URL }}
+          # 兼容：优先从 Variables (公开) 读取，若没有则从 Secrets (加密) 读取
+          STREAMLIT_APP_URL: ${{ vars.STREAMLIT_APP_URL || secrets.STREAMLIT_APP_URL }}
+          PROJECT_URL: ${{ vars.PROJECT_URL || secrets.PROJECT_URL }}
         run: |
+          echo "🔍 正在检查环境变量注入情况..."
+          echo "STREAMLIT_APP_URL 字符长度: ${#STREAMLIT_APP_URL}"
+          
+          if [ -z "$STREAMLIT_APP_URL" ] && [ -z "$PROJECT_URL" ]; then
+            echo "❌ 错误: 环境变量仍然为空！"
+            echo "请在 GitHub 设置中，要么在 'Secrets' 里填写，要么在 'Variables' 里填写 STREAMLIT_APP_URL。"
+            exit 1
+          fi
+          
           python keep/streamlit-keep.py
