@@ -18,7 +18,6 @@ logger = logging.getLogger(__name__)
 class StreamlitAppWaker:
     """针对 Streamlit 应用的自动唤醒工具"""
     
-    APP_URL = os.environ.get("STREAMLIT_APP_URL", "")
     INITIAL_WAIT_TIME = 15  # 初始等待，确保页面结构稳定
     CLICK_WAIT_TIME = 10  # 点击后的硬等待，确保异步请求完成
     
@@ -27,6 +26,12 @@ class StreamlitAppWaker:
     ROBUST_XPATH = "//button[contains(., 'Yes') and contains(., 'app back up')]"
 
     def __init__(self):
+        # 尝试从多个可能的变量名读取 URL
+        self.APP_URL = (
+            os.environ.get("STREAMLIT_APP_URL", "") or 
+            os.environ.get("PROJECT_URL", "")
+        ).strip()
+        
         self.driver = None
         self.setup_driver()
 
@@ -136,7 +141,7 @@ class StreamlitAppWaker:
 
     def wakeup_app(self):
         if not self.APP_URL:
-            raise Exception("未检测到 STREAMLIT_APP_URL 环境变量")
+            raise Exception("未检测到有效 URL！请确保已设置 STREAMLIT_APP_URL 或 PROJECT_URL 环境变量。")
         
         logger.info(f"🌐 正在访问目标地址: {self.APP_URL}")
         self.driver.get(self.APP_URL)
